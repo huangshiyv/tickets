@@ -30,6 +30,7 @@ jobs:
             if curl --fail --silent http://127.0.0.1:8000/ > /dev/null; then break; fi
             sleep 1
           done
+          node tests/room-math.cjs
           node tests/preview.cjs
       - uses: actions/upload-artifact@v4
         with:

@@ -5,6 +5,15 @@ const state = { lat: 39.9042, lng: 116.4074 };
 const params = new URLSearchParams(location.hash.slice(1));
 let viewMode = params.get('view') === '3d' ? '3d' : 'map';
 let sunScene, sceneLoading;
+let roomMode = params.get('model') === 'room';
+let pickingBearing = false;
+const roomFields = { bearing: 'house-bearing', width: 'room-width', depth: 'room-depth', height: 'room-height', windowWidth: 'window-width', windowHeight: 'window-height', sill: 'window-sill' };
+for (const [key, id] of Object.entries(roomFields)) {
+  if (params.has(key) && params.get(key).trim() !== '' && Number.isFinite(Number(params.get(key)))) $(id).value = params.get(key);
+}
+function roomConfig() {
+  return Object.fromEntries(Object.entries(roomFields).map(([key, id]) => [key, $(id).value === '' ? NaN : Number($(id).value)]));
+}
 function validDate(s) { return /^\d{4}-\d{2}-\d{2}$/.test(s || '') && Number.isFinite(Date.parse(s + 'T12:00:00Z')); }
 const openedAt = new Date();
 const browserOffset = -openedAt.getTimezoneOffset() / 60;
@@ -48,13 +57,45 @@ function clock(date, markDay = false) {
   return local.slice(11, 16) + (markDay && diff ? ` (${diff > 0 ? '+' : ''}${diff}日)` : '');
 }
 function bearing(pos) { return ((pos.azimuth / rad + 180) % 360 + 360) % 360; }
-function destination(angle, distance) {
-  const d = distance / 6371000, a = state.lat * rad, b = state.lng * rad, t = angle * rad;
-  const lat = Math.asin(Math.sin(a) * Math.cos(d) + Math.cos(a) * Math.sin(d) * Math.cos(t));
-  const lng = b + Math.atan2(Math.sin(t) * Math.sin(d) * Math.cos(a), Math.cos(d) - Math.sin(a) * Math.sin(lat));
-  return [lat / rad, lng / rad];
-}
 function solar(date) { return SunCalc.getPosition(date, state.lat, state.lng); }
+function buildTrack(times) {
+  const make = date => { const p = solar(date); return { timestamp: date.getTime(), azimuth: bearing(p), altitude: p.altitude / rad, label: clock(date) }; };
+  const hasEvents = Number.isFinite(times.sunrise.getTime()) && Number.isFinite(times.sunset.getTime());
+  const result = { segments: [], ticks: [], noon: times.solarNoon.getTime(), sunrise: null, sunset: null };
+  if (hasEvents) {
+    result.sunrise = { ...make(times.sunrise), kind: 'sunrise' };
+    result.sunset = { ...make(times.sunset), kind: 'sunset' };
+    const points = [result.sunrise];
+    for (let t = times.sunrise.getTime() + 600000; t < times.sunset.getTime(); t += 600000) points.push(make(new Date(t)));
+    points.push(result.sunset); result.segments.push(points);
+    const offset = Number($('zone').value) * 3600000;
+    const firstTick = Math.ceil((times.sunrise.getTime() + offset) / 10800000) * 10800000 - offset;
+    for (let t = firstTick; t < times.sunset.getTime() - 3600000; t += 10800000) {
+      if (t > times.sunrise.getTime() + 3600000) result.ticks.push(make(new Date(t)));
+    }
+  } else {
+    let points = [];
+    for (let minute = 0; minute <= 1440; minute += 10) {
+      const p = make(instant(minute));
+      if (p.altitude > 0) points.push(p);
+      else if (points.length) { result.segments.push(points); points = []; }
+    }
+    if (points.length) result.segments.push(points);
+  }
+  return result;
+}
+function focusMap() {
+  map.invalidateSize();
+  map.setView([state.lat, state.lng], map.getZoom(), { animate: false });
+  map.panBy([0, map.getSize().y / 2 - SolarMap.frame(map).centreY], { animate: false });
+  update();
+}
+function jumpTo(timestamp) {
+  const date = new Date(timestamp + Number($('zone').value) * 3600000);
+  $('date').value = date.toISOString().slice(0, 10);
+  $('time').value = date.getUTCHours() * 60 + date.getUTCMinutes();
+  update();
+}
 function update() {
   if (!validDate($('date').value)) { $('status').textContent = '请选择有效日期。'; return; }
   const date = instant(), pos = solar(date), az = bearing(pos), alt = pos.altitude / rad;
@@ -77,36 +118,28 @@ function update() {
   $('shadow-bearing').textContent = alt > 0 ? shadowAngle.toFixed(1) + '°' : '—';
   const height = Number($('height').value);
   $('shadow-result').textContent = !$('height').checkValidity() || $('height').value === '' ? '请输入 0–10000 米的高度。' : alt > 0 ? `影长 ${(height / Math.tan(pos.altitude)).toFixed(1)} 米 · 朝向 ${shadowAngle.toFixed(1)}°` : '太阳在地平线下，无直射阳光阴影。';
+  const config = roomConfig();
+  const roomLight = RoomLight.calculate(az, alt, config);
+  const track = buildTrack(times);
+  $('room-result').textContent = roomLight.error || (roomLight.lit
+    ? `阳光可直射入窗 · 入窗角 ${roomLight.incidence.toFixed(1)}° · ${roomLight.relative < 0 ? '偏左' : '偏右'} ${Math.abs(roomLight.relative).toFixed(1)}°`
+    : roomLight.reason === 'night' ? '太阳在地平线下，当前无直射光入窗。' : '太阳在窗户背面或侧面，当前无直射光入窗。');
+  $('room-depth-result').textContent = roomLight.depth
+    ? `地板光斑深入 ${roomLight.depth[0].toFixed(2)}–${roomLight.depth[1].toFixed(2)} 米（从窗墙起）`
+    : roomLight.lit ? '光线落在后墙或侧墙，当前没有地板光斑。' : '';
+  $('room-result').classList.toggle('invalid', Boolean(roomLight.error));
+  for (const button of document.querySelectorAll('[data-bearing]')) button.setAttribute('aria-pressed', String(Number(button.dataset.bearing) === config.bearing));
   document.querySelector('.canvas').classList.toggle('is-night', alt <= 0);
-  $('scene-state').textContent = alt <= 0
+  $('scene-state').textContent = roomMode ? $('room-result').textContent : alt <= 0
     ? '太阳已在地平线下 · 当前没有直射阳光'
-    : `太阳高度 ${alt.toFixed(1)}° · 橙色箭头表示光线照射方向${alt < 10 ? ' · 长阴影可能超出场景' : ''}`;
-  if (viewMode === '3d' && sunScene) sunScene.update(az, alt, $('height').checkValidity() && $('height').value !== '' ? height : 0);
+    : `太阳高度 ${alt.toFixed(1)}° · 箭头从日出沿轨迹指向日落`;
+  if (viewMode === '3d' && sunScene) sunScene.update(az, alt, $('height').checkValidity() && $('height').value !== '' ? height : 0, { roomMode, config, roomLight, track });
   $('lat').value = state.lat.toFixed(5); $('lng').value = state.lng.toFixed(5);
-  layers.clearLayers();
-  const length = Math.max(100, map.getBounds().getSouthWest().distanceTo(map.getBounds().getNorthEast()) * .27);
-  function ray(angle, color, dash) {
-    const end = destination(angle, length);
-    L.polyline([[state.lat, state.lng], end], { color, weight: 2, dashArray: dash, interactive: false }).addTo(layers);
-    return end;
-  }
-  if (hasEvents) {
-    ray(bearing(solar(times.sunrise)), '#d9a73d', '7 5');
-    ray(bearing(solar(times.sunset)), '#8b70a7', '7 5');
-  }
-  // Directional arc at a fixed map radius, not the physical path of the Sun.
-  let arc = [];
-  for (let min = 0; min <= 1440; min += 10) {
-    const p = solar(instant(min));
-    if (p.altitude >= 0) arc.push(destination(bearing(p), length));
-    else if (arc.length) { L.polyline(arc, { color: '#dcb455', weight: 2, opacity: .65, interactive: false }).addTo(layers); arc = []; }
-  }
-  if (arc.length) L.polyline(arc, { color: '#dcb455', weight: 2, opacity: .65, interactive: false }).addTo(layers);
-  const end = ray(az, '#df7c35', alt <= 0 ? '4 7' : undefined);
-  L.marker(end, { interactive: false, icon: L.divIcon({ className: 'sun-pin', html: '☀', iconSize: [34, 34], iconAnchor: [17, 17] }) }).addTo(layers);
-  if (alt > 0) ray(shadowAngle, '#586961', '3 6');
+  SolarMap.render(map, layers, { lat: state.lat, lng: state.lng, azimuth: az, altitude: alt, track, facing: Number.isFinite(config.bearing) ? config.bearing : 180 }, jumpTo);
   const hash = new URLSearchParams({ lat: state.lat.toFixed(5), lng: state.lng.toFixed(5), date: $('date').value, time: $('time').value, zone: $('zone').value });
   if (viewMode === '3d') hash.set('view', '3d');
+  if (roomMode) hash.set('model', 'room');
+  for (const [key, value] of Object.entries(config)) if (Number.isFinite(value)) hash.set(key, String(value));
   history.replaceState(null, '', '#' + hash);
 }
 function sceneUnavailable() {
@@ -126,7 +159,7 @@ async function setViewMode(mode) {
   $('view-3d').setAttribute('aria-pressed', String(is3D));
   sunScene?.setVisible(is3D);
   update();
-  if (!is3D) { requestAnimationFrame(() => map.invalidateSize()); return; }
+  if (!is3D) { requestAnimationFrame(focusMap); return; }
   if (!sunScene && !sceneLoading) {
     $('view-3d').setAttribute('aria-busy', 'true');
     for (const id of ['scene-reset', 'scene-side', 'scene-top']) $(id).disabled = true;
@@ -137,6 +170,7 @@ async function setViewMode(mode) {
       for (const id of ['scene-reset', 'scene-side', 'scene-top']) $(id).disabled = false;
       sunScene.setVisible(viewMode === '3d');
       update();
+      if (roomMode) sunScene.setView('room');
     }).catch(() => {
       sunScene?.dispose(); sunScene = undefined;
       $('sun-scene').querySelector('canvas')?.remove();
@@ -156,11 +190,44 @@ function selectLocation(lat, lng, name, center = true) {
   Object.assign(state, { lat, lng }); point.setLatLng([lat, lng]);
   $('place').textContent = name || '地图上的观测点';
   $('status').textContent = '位置已更新，请确认显示时区。';
-  if (center) map.panTo([lat, lng]); update();
+  if (center) focusMap(); else update();
 }
-map.on('click', e => selectLocation(e.latlng.lat, ((e.latlng.lng + 180) % 360 + 360) % 360 - 180, null, false));
+map.on('click', e => {
+  if (pickingBearing) {
+    const lat1 = state.lat * rad, lat2 = e.latlng.lat * rad, delta = (e.latlng.lng - state.lng) * rad;
+    if (map.distance([state.lat, state.lng], e.latlng) < 1) { $('status').textContent = '请点击离观测点稍远的位置以指定朝向。'; return; }
+    const angle = Math.atan2(Math.sin(delta) * Math.cos(lat2), Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(delta)) / rad;
+    $('house-bearing').value = Math.round((angle + 360) % 360);
+    pickingBearing = false; $('pick-bearing').setAttribute('aria-pressed', 'false');
+    $('status').textContent = `窗户朝向已设置为 ${$('house-bearing').value}°。`;
+    update();
+  } else selectLocation(e.latlng.lat, ((e.latlng.lng + 180) % 360 + 360) % 360 - 180, null, true);
+});
 point.on('dragend', () => { const p = point.getLatLng(); selectLocation(p.lat, ((p.lng + 180) % 360 + 360) % 360 - 180); });
 map.on('zoomend', update);
+$('map-fit').onclick = focusMap;
+map.on('resize', () => { if (viewMode === 'map') requestAnimationFrame(focusMap); });
+for (const id of Object.values(roomFields)) $(id).addEventListener('input', update);
+for (const button of document.querySelectorAll('[data-bearing]')) button.onclick = () => { $('house-bearing').value = button.dataset.bearing; update(); };
+$('pick-bearing').onclick = () => {
+  pickingBearing = !pickingBearing;
+  $('pick-bearing').setAttribute('aria-pressed', String(pickingBearing));
+  setViewMode('map');
+  $('status').textContent = pickingBearing ? '请在地图上点击窗户朝外正对的方向。观测点位置不变。' : '已取消朝向选择。';
+  $('map').scrollIntoView({ block: 'center' });
+};
+function setRoomMode(value) {
+  roomMode = value;
+  $('model-building').setAttribute('aria-pressed', String(!value));
+  $('model-room').setAttribute('aria-pressed', String(value));
+  $('scene-title').textContent = value ? '阳光如何走进房间' : '感受阳光的角度';
+  $('scene-description').textContent = value ? '屋顶剖开查看 · 金色光斑为窗户直射光' : '日出 → 白天轨迹 → 日落 · 示意建筑';
+  update(); sunScene?.setView(value ? 'room' : 'reset');
+}
+$('model-building').onclick = () => setRoomMode(false);
+$('model-room').onclick = () => setRoomMode(true);
+$('open-room').onclick = () => { setRoomMode(true); setViewMode('3d'); document.querySelector('.canvas').scrollIntoView({ block: 'start' }); };
+
 for (const id of ['time', 'height']) $(id).addEventListener('input', update);
 for (const id of ['date', 'zone']) $(id).addEventListener('change', update);
 $('coordinates-go').onclick = () => {
@@ -198,5 +265,6 @@ $('share').onclick = async () => {
   try { await navigator.clipboard.writeText(location.href); $('status').textContent = '地点、日期与时间链接已复制。'; }
   catch { $('status').textContent = '请复制浏览器地址栏分享当前位置。'; }
 };
-update();
+setRoomMode(roomMode);
 if (viewMode === '3d') setViewMode('3d');
+else requestAnimationFrame(focusMap);
