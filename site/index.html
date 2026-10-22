@@ -15,7 +15,7 @@
 <div class="location"><strong id="place">北京 · 中国</strong><button id="locate" class="quiet">◎ 我的位置</button></div>
 <div class="coordinates"><label>纬度<input id="lat" type="number" min="-85" max="85" step="0.00001" value="39.9042"></label><label>经度<input id="lng" type="number" min="-180" max="180" step="0.00001" value="116.4074"></label><button id="coordinates-go" aria-label="前往坐标">↗</button></div>
 <div class="date-row"><label for="date">观测日期<input id="date" type="date" required></label><label for="zone">显示时区<select id="zone"><option value="0">UTC ±00:00</option><option value="1">UTC +01:00</option><option value="2">UTC +02:00</option><option value="8" selected>UTC +08:00</option><option value="9">UTC +09:00</option><option value="-4">UTC −04:00</option><option value="-5">UTC −05:00</option><option value="5.5">UTC +05:30</option><option value="10">UTC +10:00</option></select></label></div>
-<p class="hint">时间使用所选固定 UTC 偏移；切换地点后请确认时区。</p>
+<p class="hint">默认使用浏览器当前时区、日期和时间。时间按所选固定 UTC 偏移显示；切换地点或夏令时时请确认时区。</p>
 <div class="sun-times"><div><span>↗ 日出</span><strong id="sunrise">—</strong></div><div><span>☀ 太阳正午</span><strong id="noon">—</strong></div><div><span>↘ 日落</span><strong id="sunset">—</strong></div></div>
 <div class="details"><div><span>曙光开始</span><b id="dawn">—</b></div><div><span>暮光结束</span><b id="dusk">—</b></div><div><span>日照时长</span><b id="duration">—</b></div><div><span>傍晚黄金时段</span><b id="golden">—</b></div></div>
 <section class="shadow"><label for="height">阴影模拟 <span>物体高度 / 米</span></label><input id="height" type="number" min="0" max="10000" step="0.1" value="10"><p id="shadow-result">—</p></section>

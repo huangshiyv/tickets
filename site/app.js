@@ -4,10 +4,22 @@ const rad = Math.PI / 180;
 const state = { lat: 39.9042, lng: 116.4074 };
 const params = new URLSearchParams(location.hash.slice(1));
 function validDate(s) { return /^\d{4}-\d{2}-\d{2}$/.test(s || '') && Number.isFinite(Date.parse(s + 'T12:00:00Z')); }
-const zoneOptions = [...$('zone').options].map(o => o.value);
-if (zoneOptions.includes(params.get('zone'))) $('zone').value = params.get('zone');
+const openedAt = new Date();
+const browserOffset = -openedAt.getTimezoneOffset() / 60;
+const sharedOffset = Number(params.get('zone'));
+const hasSharedOffset = params.has('zone') && params.get('zone').trim() !== '' && Number.isFinite(sharedOffset) && sharedOffset >= -12 && sharedOffset <= 14 && Number.isInteger(sharedOffset * 60);
+const initialOffset = hasSharedOffset ? sharedOffset : browserOffset;
+// Include offsets missing from the short preset list, such as UTC+05:45.
+if (![...$('zone').options].some(option => Number(option.value) === initialOffset)) {
+  const minutes = Math.round(Math.abs(initialOffset) * 60);
+  const label = `UTC ${initialOffset < 0 ? '−' : '+'}${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
+  $('zone').add(new Option(label, String(initialOffset)));
+}
+$('zone').value = String(initialOffset);
 function today() { return new Date(Date.now() + Number($('zone').value) * 3600000).toISOString().slice(0, 10); }
 $('date').value = validDate(params.get('date')) ? params.get('date') : today();
+const initialLocalTime = new Date(openedAt.getTime() + initialOffset * 3600000);
+$('time').value = initialLocalTime.getUTCHours() * 60 + initialLocalTime.getUTCMinutes();
 if (params.has('time') && Number.isInteger(Number(params.get('time'))) && Number(params.get('time')) >= 0 && Number(params.get('time')) <= 1439) $('time').value = params.get('time');
 if (params.has('lat') && params.has('lng') && Math.abs(Number(params.get('lat'))) <= 85 && Math.abs(Number(params.get('lng'))) <= 180) {
   state.lat = Number(params.get('lat')); state.lng = Number(params.get('lng'));

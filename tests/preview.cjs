@@ -5,6 +5,31 @@ const fs = require('node:fs');
   const browser = await chromium.launch(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH, args: ['--no-sandbox'] } : {});
   fs.mkdirSync(process.env.PREVIEW_DIR || 'preview', { recursive: true });
   try {
+    // One instant spans different local dates and fractional timezone offsets.
+    for (const [timezoneId, zone, date, time] of [
+      ['Europe/Paris', '2', '2026-06-22', '90'],
+      ['America/Los_Angeles', '-7', '2026-06-21', '990'],
+      ['Asia/Kathmandu', '5.75', '2026-06-22', '315']
+    ]) {
+      const page = await browser.newPage({ timezoneId });
+      await page.clock.setFixedTime(new Date('2026-06-21T23:30:00Z'));
+      await page.goto('http://127.0.0.1:8000/');
+      await page.waitForFunction(() => location.hash.includes('zone='));
+      assert.equal(await page.locator('#zone').inputValue(), zone);
+      assert.equal(await page.locator('#date').inputValue(), date);
+      assert.equal(await page.locator('#time').inputValue(), time);
+      await page.reload();
+      await page.waitForFunction(() => document.getElementById('sunrise').textContent !== '—');
+      assert.equal(await page.locator('#zone').inputValue(), zone, 'Fractional offset survives URL restore');
+      await page.goto('http://127.0.0.1:8000/#date=2026-01-15&time=720&zone=8');
+      await page.reload();
+      await page.waitForFunction(() => document.getElementById('sunrise').textContent !== '—');
+      assert.equal(await page.locator('#zone').inputValue(), '8', 'Shared timezone takes priority');
+      assert.equal(await page.locator('#date').inputValue(), '2026-01-15');
+      assert.equal(await page.locator('#time').inputValue(), '720');
+      await page.close();
+      console.log(`${timezoneId}: browser timezone, local date/time and shared settings passed`);
+    }
     for (const [name, width, height] of [['desktop', 1440, 1000], ['mobile', 390, 844]]) {
       const page = await browser.newPage({ viewport: { width, height } });
       const errors = []; page.on('pageerror', e => errors.push(e.message));
