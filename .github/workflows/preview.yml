@@ -22,7 +22,7 @@ jobs:
           NODE_PATH: ${{ runner.temp }}/preview-tools/node_modules
         run: |
           mkdir -p preview
-          cp site/index.html preview/index.html
+          cp -R site/. preview/
           python3 -m http.server 8000 --bind 127.0.0.1 --directory site > "$RUNNER_TEMP/preview-server.log" 2>&1 &
           SERVER_PID=$!
           trap 'kill "$SERVER_PID"' EXIT
@@ -30,22 +30,7 @@ jobs:
             if curl --fail --silent http://127.0.0.1:8000/ > /dev/null; then break; fi
             sleep 1
           done
-          node <<'JS'
-          const { chromium } = require('playwright');
-          (async () => {
-            const browser = await chromium.launch();
-            try {
-              for (const [name, width, height] of [['desktop', 1440, 900], ['mobile', 390, 844]]) {
-                const page = await browser.newPage({ viewport: { width, height } });
-                await page.goto('http://127.0.0.1:8000/');
-                if (!(await page.locator('h1').innerText()).trim()) throw new Error('Missing homepage heading');
-                if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)) throw new Error('Horizontal overflow');
-                await page.screenshot({ path: `preview/${name}.png`, fullPage: true });
-                await page.close();
-              }
-            } finally { await browser.close(); }
-          })().catch(error => { console.error(error); process.exit(1); });
-          JS
+          node tests/preview.cjs
       - uses: actions/upload-artifact@v4
         with:
           name: homepage-preview-${{ github.event.pull_request.number || github.run_number }}
@@ -54,4 +39,4 @@ jobs:
       - name: Preview instructions
         run: |
           echo '### 首页预览' >> "$GITHUB_STEP_SUMMARY"
-          echo '下载本次运行的 homepage-preview artifact：desktop.png 和 mobile.png 为页面截图；index.html 可在浏览器中打开。' >> "$GITHUB_STEP_SUMMARY"
+          echo '下载本次运行的 homepage-preview artifact：desktop.png 和 mobile.png 为页面截图；解压全部文件后运行 python3 -m http.server 8000 可预览网页。' >> "$GITHUB_STEP_SUMMARY"

@@ -1,28 +1,31 @@
 <!doctype html>
 <html lang="zh-CN">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="description" content="tickets 的第一个网页">
-<title>Hello World, kaixin. · tickets</title>
-<style>
-* { box-sizing: border-box; }
-body { margin: 0; min-height: 100svh; display: grid; place-items: center; padding: 24px; color: #f1f5f9; background: #0b1120; font-family: system-ui, sans-serif; }
-main { width: min(100%, 760px); padding: clamp(28px, 7vw, 72px); border: 1px solid #334155; border-radius: 24px; background: radial-gradient(ellipse at top right, #18334c, #111827 70%); }
-.label { color: #67e8f9; font-size: 14px; letter-spacing: .16em; }
-h1 { margin: 24px 0; font-size: clamp(44px, 9vw, 80px); line-height: 1.05; letter-spacing: -.05em; }
-p { color: #cbd5e1; line-height: 1.8; }
-a { display: inline-block; margin-top: 20px; padding: 12px 20px; border-radius: 10px; background: #67e8f9; color: #083344; font-weight: 650; text-decoration: none; }
-a:hover { background: #a5f3fc; }
-a:focus-visible { outline: 3px solid white; outline-offset: 5px; }
-</style>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="在地图上探索太阳轨迹、日出日落与阴影。"><title>逐光 · Sun Atlas</title>
+<link rel="stylesheet" href="vendor/leaflet.css"><link rel="stylesheet" href="style.css">
+<script defer src="vendor/leaflet.js"></script><script defer src="vendor/suncalc.js"></script><script defer src="app.js"></script>
 </head>
 <body>
+<header><a class="brand" href="./"><span class="logo">☀</span><span>逐光 <small>SUN ATLAS</small></span></a><span class="tagline">每一束光，都有方向。</span><button id="share" class="quiet">分享位置 ↗</button></header>
 <main>
-<span class="label">TICKETS / FIRST RELEASE</span>
-<h1>Hello World, kaixin.</h1>
-<p>你好，世界！这是 tickets 的第一个网页。<br>从一个想法开始，让每一次提交都看得见。</p>
-<a href="https://github.com/huangshiyv/tickets">查看 GitHub 仓库 →</a>
+<aside>
+<div class="eyebrow">EXPLORE THE LIGHT</div><h1>追随太阳的轨迹<span>发现此刻的光。</span></h1>
+<form id="search-form"><label for="search">寻找一个地点</label><div class="search-row"><input id="search" placeholder="搜索城市、街道…" maxlength="160" required><button aria-label="搜索地点">搜索</button></div></form><div id="results" aria-live="polite"></div>
+<div class="location"><strong id="place">北京 · 中国</strong><button id="locate" class="quiet">◎ 我的位置</button></div>
+<div class="coordinates"><label>纬度<input id="lat" type="number" min="-85" max="85" step="0.00001" value="39.9042"></label><label>经度<input id="lng" type="number" min="-180" max="180" step="0.00001" value="116.4074"></label><button id="coordinates-go" aria-label="前往坐标">↗</button></div>
+<div class="date-row"><label for="date">观测日期<input id="date" type="date" required></label><label for="zone">显示时区<select id="zone"><option value="0">UTC ±00:00</option><option value="1">UTC +01:00</option><option value="2">UTC +02:00</option><option value="8" selected>UTC +08:00</option><option value="9">UTC +09:00</option><option value="-4">UTC −04:00</option><option value="-5">UTC −05:00</option><option value="5.5">UTC +05:30</option><option value="10">UTC +10:00</option></select></label></div>
+<p class="hint">时间使用所选固定 UTC 偏移；切换地点后请确认时区。</p>
+<div class="sun-times"><div><span>↗ 日出</span><strong id="sunrise">—</strong></div><div><span>☀ 太阳正午</span><strong id="noon">—</strong></div><div><span>↘ 日落</span><strong id="sunset">—</strong></div></div>
+<div class="details"><div><span>曙光开始</span><b id="dawn">—</b></div><div><span>暮光结束</span><b id="dusk">—</b></div><div><span>日照时长</span><b id="duration">—</b></div><div><span>傍晚黄金时段</span><b id="golden">—</b></div></div>
+<section class="shadow"><label for="height">阴影模拟 <span>物体高度 / 米</span></label><input id="height" type="number" min="0" max="10000" step="0.1" value="10"><p id="shadow-result">—</p></section>
+<p id="status" role="status">点击地图，选择你的观测位置。</p>
+<footer>太阳计算：SunCalc · 地图：OpenStreetMap<br>用于摄影与日常规划，非精密测量工具。</footer>
+</aside>
+<section class="canvas" aria-label="太阳位置地图">
+<div id="map"></div><div class="map-badge"><span class="live-dot"></span> 光影地图 <small>点击任意位置探索</small></div>
+<div class="legend"><span class="rise">日出方向</span><span class="current">当前方向</span><span class="set">日落方向</span></div>
+<div class="timeline"><div class="time-top"><div><span class="eyebrow">TIME OF DAY</span><strong id="clock">12:00</strong></div><span id="phase">—</span><button id="now" class="quiet">此刻</button></div><label for="time" class="sr-only">一天中的时间</label><input id="time" type="range" min="0" max="1439" value="720"><div class="ticks"><span>00:00</span><span>06:00</span><span>12:00</span><span>18:00</span><span>24:00</span></div><div class="metrics"><div><span>太阳方位角</span><b id="azimuth">—</b></div><div><span>太阳高度角</span><b id="altitude">—</b></div><div><span>阴影方向</span><b id="shadow-bearing">—</b></div></div></div>
+</section>
 </main>
-</body>
-</html>
+</body></html>
