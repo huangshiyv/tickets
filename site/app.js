@@ -3,6 +3,8 @@ const $ = id => document.getElementById(id);
 const rad = Math.PI / 180;
 const state = { lat: 39.9042, lng: 116.4074 };
 const params = new URLSearchParams(location.hash.slice(1));
+let viewMode = params.get('view') === '3d' ? '3d' : 'map';
+let sunScene, sceneLoading;
 function validDate(s) { return /^\d{4}-\d{2}-\d{2}$/.test(s || '') && Number.isFinite(Date.parse(s + 'T12:00:00Z')); }
 const openedAt = new Date();
 const browserOffset = -openedAt.getTimezoneOffset() / 60;
@@ -75,6 +77,11 @@ function update() {
   $('shadow-bearing').textContent = alt > 0 ? shadowAngle.toFixed(1) + '°' : '—';
   const height = Number($('height').value);
   $('shadow-result').textContent = !$('height').checkValidity() || $('height').value === '' ? '请输入 0–10000 米的高度。' : alt > 0 ? `影长 ${(height / Math.tan(pos.altitude)).toFixed(1)} 米 · 朝向 ${shadowAngle.toFixed(1)}°` : '太阳在地平线下，无直射阳光阴影。';
+  document.querySelector('.canvas').classList.toggle('is-night', alt <= 0);
+  $('scene-state').textContent = alt <= 0
+    ? '太阳已在地平线下 · 当前没有直射阳光'
+    : `太阳高度 ${alt.toFixed(1)}° · 橙色箭头表示光线照射方向${alt < 10 ? ' · 长阴影可能超出场景' : ''}`;
+  if (viewMode === '3d' && sunScene) sunScene.update(az, alt, $('height').checkValidity() && $('height').value !== '' ? height : 0);
   $('lat').value = state.lat.toFixed(5); $('lng').value = state.lng.toFixed(5);
   layers.clearLayers();
   const length = Math.max(100, map.getBounds().getSouthWest().distanceTo(map.getBounds().getNorthEast()) * .27);
@@ -99,8 +106,51 @@ function update() {
   L.marker(end, { interactive: false, icon: L.divIcon({ className: 'sun-pin', html: '☀', iconSize: [34, 34], iconAnchor: [17, 17] }) }).addTo(layers);
   if (alt > 0) ray(shadowAngle, '#586961', '3 6');
   const hash = new URLSearchParams({ lat: state.lat.toFixed(5), lng: state.lng.toFixed(5), date: $('date').value, time: $('time').value, zone: $('zone').value });
+  if (viewMode === '3d') hash.set('view', '3d');
   history.replaceState(null, '', '#' + hash);
 }
+function sceneUnavailable() {
+  $('scene-loading').hidden = false;
+  $('scene-loading').textContent = '当前浏览器无法显示 3D。请开启硬件加速或换一个浏览器，也可以切回二维地图查看太阳方向。';
+  $('sun-scene').dataset.state = 'unavailable';
+  for (const id of ['scene-reset', 'scene-side', 'scene-top']) $(id).disabled = true;
+}
+async function setViewMode(mode) {
+  viewMode = mode;
+  const is3D = mode === '3d';
+  document.querySelector('.canvas').classList.toggle('sun-mode', is3D);
+  $('sun-panel').hidden = !is3D;
+  $('map').setAttribute('aria-hidden', String(is3D));
+  $('map').inert = is3D;
+  $('view-map').setAttribute('aria-pressed', String(!is3D));
+  $('view-3d').setAttribute('aria-pressed', String(is3D));
+  sunScene?.setVisible(is3D);
+  update();
+  if (!is3D) { requestAnimationFrame(() => map.invalidateSize()); return; }
+  if (!sunScene && !sceneLoading) {
+    $('view-3d').setAttribute('aria-busy', 'true');
+    for (const id of ['scene-reset', 'scene-side', 'scene-top']) $(id).disabled = true;
+    sceneLoading = import('./sun-scene.js').then(({ createSunScene }) => {
+      sunScene = createSunScene($('sun-scene'));
+      $('scene-loading').hidden = true;
+      $('sun-scene').dataset.state = 'ready';
+      for (const id of ['scene-reset', 'scene-side', 'scene-top']) $(id).disabled = false;
+      sunScene.setVisible(viewMode === '3d');
+      update();
+    }).catch(() => {
+      sunScene?.dispose(); sunScene = undefined;
+      $('sun-scene').querySelector('canvas')?.remove();
+      sceneUnavailable();
+    }).finally(() => {
+      $('view-3d').removeAttribute('aria-busy');
+      sceneLoading = undefined;
+    });
+  }
+}
+$('view-map').onclick = () => setViewMode('map');
+$('view-3d').onclick = () => setViewMode('3d');
+$('sun-scene').addEventListener('scene-unavailable', sceneUnavailable);
+for (const view of ['reset', 'side', 'top']) $(`scene-${view}`).onclick = () => sunScene?.setView(view);
 function selectLocation(lat, lng, name, center = true) {
   if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 85 || Math.abs(lng) > 180) { $('status').textContent = '请输入纬度 −85～85、经度 −180～180。'; return; }
   Object.assign(state, { lat, lng }); point.setLatLng([lat, lng]);
@@ -149,3 +199,4 @@ $('share').onclick = async () => {
   catch { $('status').textContent = '请复制浏览器地址栏分享当前位置。'; }
 };
 update();
+if (viewMode === '3d') setViewMode('3d');

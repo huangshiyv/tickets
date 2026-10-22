@@ -4,6 +4,7 @@
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="description" content="在地图上探索太阳轨迹、日出日落与阴影。"><title>逐光 · Sun Atlas</title>
 <link rel="stylesheet" href="vendor/leaflet.css"><link rel="stylesheet" href="style.css">
+<script type="importmap">{"imports":{"three":"./vendor/three.module.min.js"}}</script>
 <script defer src="vendor/leaflet.js"></script><script defer src="vendor/suncalc.js"></script><script defer src="app.js"></script>
 </head>
 <body>
@@ -23,7 +24,14 @@
 <footer>太阳计算：SunCalc · 地图：OpenStreetMap<br>用于摄影与日常规划，非精密测量工具。</footer>
 </aside>
 <section class="canvas" aria-label="太阳位置地图">
-<div id="map"></div><div class="map-badge"><span class="live-dot"></span> 光影地图 <small>点击任意位置探索</small></div>
+<div id="map"></div>
+<div class="view-switch" role="group" aria-label="显示模式"><button id="view-map" aria-pressed="true">二维地图</button><button id="view-3d" aria-pressed="false">☀ 3D 日照</button></div>
+<div id="sun-panel" hidden>
+  <div class="scene-heading"><span class="eyebrow">LIGHT IN SPACE</span><strong>感受阳光的角度</strong><p>示意建筑 · 阳光按所选地点与时间计算</p></div>
+  <div id="sun-scene" role="img" aria-label="可旋转的三维太阳光照与建筑阴影示意图"><p id="scene-loading" role="status">正在准备 3D 日照视图…</p></div>
+  <div class="scene-tools" role="group" aria-label="三维视角"><button id="scene-reset" class="quiet">重置视角</button><button id="scene-side" class="quiet">侧面看角度</button><button id="scene-top" class="quiet">俯视阴影</button></div>
+  <div class="scene-caption"><span id="scene-state" role="status"></span><small>拖动旋转 · 滚轮或双指缩放 · 切换二维地图选点</small></div>
+</div>
 <div class="legend"><span class="rise">日出方向</span><span class="current">当前方向</span><span class="set">日落方向</span></div>
 <div class="timeline"><div class="time-top"><div><span class="eyebrow">TIME OF DAY</span><strong id="clock">12:00</strong></div><span id="phase">—</span><button id="now" class="quiet">此刻</button></div><label for="time" class="sr-only">一天中的时间</label><input id="time" type="range" min="0" max="1439" value="720"><div class="ticks"><span>00:00</span><span>06:00</span><span>12:00</span><span>18:00</span><span>24:00</span></div><div class="metrics"><div><span>太阳方位角</span><b id="azimuth">—</b></div><div><span>太阳高度角</span><b id="altitude">—</b></div><div><span>阴影方向</span><b id="shadow-bearing">—</b></div></div></div>
 </section>

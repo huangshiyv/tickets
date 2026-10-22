@@ -2,7 +2,10 @@ const { chromium } = require('playwright');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 (async () => {
-  const browser = await chromium.launch(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH, args: ['--no-sandbox'] } : {});
+  const browser = await chromium.launch({
+    ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}),
+    args: ['--no-sandbox', '--use-angle=swiftshader', '--enable-unsafe-swiftshader']
+  });
   fs.mkdirSync(process.env.PREVIEW_DIR || 'preview', { recursive: true });
   try {
     // One instant spans different local dates and fractional timezone offsets.
@@ -58,8 +61,55 @@ const fs = require('node:fs');
       const hash = await page.evaluate(() => location.hash); assert.match(hash, /lat=48.85660/);
       await page.reload(); await page.waitForFunction(() => document.getElementById('lat').value === '48.85660');
       await page.screenshot({ path: `${process.env.PREVIEW_DIR || 'preview'}/${name}.png`, fullPage: true });
+      await page.locator('#view-3d').click();
+      await page.waitForFunction(() => document.getElementById('sun-scene').dataset.state === 'ready');
+      const scene = page.locator('#sun-scene canvas');
+      const initialScene = await scene.screenshot();
+      await page.locator('#height').fill('20');
+      assert.notDeepEqual(await scene.screenshot(), initialScene, 'Building height updates the rendered scene');
+      await page.locator('#height').fill('10');
+      await scene.scrollIntoViewIfNeeded();
+      const box = await scene.boundingBox();
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.mouse.down(); await page.mouse.move(box.x + box.width / 2 + 70, box.y + box.height / 2, { steps: 8 }); await page.mouse.up();
+      assert.notDeepEqual(await scene.screenshot(), initialScene, 'Dragging rotates the 3D camera');
+      await page.locator('#scene-side').click();
+      assert.notDeepEqual(await scene.screenshot(), initialScene, 'Side view shows solar elevation');
+      await page.locator('#scene-top').click();
+      const topScene = await scene.screenshot();
+      await page.locator('#time').fill('0');
+      assert.match(await page.locator('#scene-state').innerText(), /没有直射阳光/);
+      assert.notDeepEqual(await scene.screenshot(), topScene, 'Night removes direct light and shadows');
+      await page.locator('#time').fill('960');
+      await page.locator('#scene-reset').click();
+      const caption = await page.locator('.scene-caption').boundingBox();
+      const timeline = await page.locator('.timeline').boundingBox();
+      assert.ok(caption.y + caption.height < timeline.y, '3D instructions remain above the timeline');
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+      assert.match(await page.evaluate(() => location.hash), /view=3d/);
+      await page.screenshot({ path: `${process.env.PREVIEW_DIR || 'preview'}/${name}-3d.png`, fullPage: true });
+      await page.reload();
+      await page.waitForFunction(() => document.getElementById('sun-scene').dataset.state === 'ready');
+      assert.equal(await page.locator('#view-3d').getAttribute('aria-pressed'), 'true');
+      await page.locator('#view-map').click();
+      assert.equal(await page.locator('#sun-panel').isVisible(), false);
       assert.deepEqual(errors, []);
-      await page.close(); console.log(`${name}: solar events, time slider, shadow, polar days, search, sharing and layout passed`);
+      await page.close(); console.log(`${name}: solar events, time slider, shadows, polar days, search, sharing, 3D rendering/rotation/night/views and layout passed`);
     }
+    const fallback = await browser.newPage();
+    await fallback.addInitScript(() => {
+      const original = HTMLCanvasElement.prototype.getContext;
+      HTMLCanvasElement.prototype.getContext = function (type, ...args) {
+        return type.startsWith('webgl') ? null : original.call(this, type, ...args);
+      };
+    });
+    await fallback.goto('http://127.0.0.1:8000/');
+    await fallback.locator('#view-3d').click();
+    await fallback.waitForFunction(() => document.getElementById('sun-scene').dataset.state === 'unavailable');
+    assert.match(await fallback.locator('#scene-loading').innerText(), /无法显示 3D/);
+    await fallback.locator('#view-map').click();
+    assert.equal(await fallback.locator('#map').getAttribute('aria-hidden'), 'false');
+    await fallback.close();
+    console.log('Unavailable WebGL: readable fallback and return to map passed');
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exit(1); });
